@@ -67,6 +67,7 @@ export type RegisterInput = {
   birth_date: string;
   phone_number?: string;
 };
+export const MAX_CONVERSATION_MESSAGES = 100;
 export type ChatReply = { conversation_id: string; reply: string; degraded: boolean };
 
 type TokenResponse = { access_token: string };
@@ -109,27 +110,45 @@ export function getMe(): Promise<User> {
   return request<User>("/auth/me");
 }
 
-export async function sendChatMessage(
-  message: string,
-  conversationId: string | null,
-): Promise<ChatReply> {
-  const body = { message, conversation_id: conversationId };
+/** Authenticated request. If the 15-minute access token expired, refresh once and retry. */
+async function authedRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
-    return await request<ChatReply>("/chat/messages", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return await request<T>(path, init);
   } catch (err) {
-    // Access token expired (15 min): refresh once and retry.
     if (err instanceof ApiError && err.status === 401) {
       accessToken = null;
-      if (await restoreSession()) {
-        return request<ChatReply>("/chat/messages", {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
-      }
+      if (await restoreSession()) return request<T>(path, init);
     }
     throw err;
   }
+}
+
+export function sendChatMessage(
+  message: string,
+  conversationId: string | null,
+): Promise<ChatReply> {
+  return authedRequest<ChatReply>("/chat/messages", {
+    method: "POST",
+    body: JSON.stringify({ message, conversation_id: conversationId }),
+  });
+}
+
+export type ConversationSummary = {
+  id: string;
+  title: string;
+  message_count: number;
+  updated_at: string;
+};
+export type TranscriptMessage = {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+export function listConversations(): Promise<ConversationSummary[]> {
+  return authedRequest<ConversationSummary[]>("/chat/conversations");
+}
+
+export function getConversationMessages(id: string): Promise<TranscriptMessage[]> {
+  return authedRequest<TranscriptMessage[]>(`/chat/conversations/${id}/messages`);
 }

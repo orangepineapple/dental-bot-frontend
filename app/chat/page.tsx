@@ -3,7 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-import { getMe, logout, restoreSession, sendChatMessage, type User } from "@/lib/api";
+import {
+  MAX_CONVERSATION_MESSAGES,
+  getConversationMessages,
+  getMe,
+  listConversations,
+  logout,
+  restoreSession,
+  sendChatMessage,
+  type ConversationSummary,
+  type User,
+} from "@/lib/api";
 
 type Msg = { role: "user" | "assistant"; content: string; degraded?: boolean };
 
@@ -15,6 +25,9 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,6 +49,43 @@ export default function ChatPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  const isFull = messages.length + 2 > MAX_CONVERSATION_MESSAGES;
+
+  async function openHistory() {
+    setShowHistory(true);
+    setLoadingHistory(true);
+    setError(null);
+    try {
+      setConversations(await listConversations());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load chats");
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  function startNewChat() {
+    setMessages([]);
+    setConversationId(null);
+    setError(null);
+    setShowHistory(false);
+  }
+
+  async function resumeChat(id: string) {
+    setLoadingHistory(true);
+    setError(null);
+    try {
+      const transcript = await getConversationMessages(id);
+      setMessages(transcript.map((m) => ({ role: m.role, content: m.content })));
+      setConversationId(id);
+      setShowHistory(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load chat");
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
 
   async function onSend(e: React.FormEvent) {
     e.preventDefault();
@@ -77,11 +127,13 @@ export default function ChatPage() {
         </div>
         <div className="flex gap-3 text-sm">
           <button
-            onClick={() => {
-              setMessages([]);
-              setConversationId(null);
-              setError(null);
-            }}
+            onClick={() => (showHistory ? setShowHistory(false) : openHistory())}
+            className="text-zinc-600 hover:underline dark:text-zinc-400"
+          >
+            {showHistory ? "Back to chat" : "Past chats"}
+          </button>
+          <button
+            onClick={startNewChat}
             className="text-zinc-600 hover:underline dark:text-zinc-400"
           >
             New chat
@@ -92,6 +144,37 @@ export default function ChatPage() {
         </div>
       </header>
 
+      {showHistory ? (
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {loadingHistory && <p className="text-sm text-zinc-500">Loading…</p>}
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+          {!loadingHistory && conversations?.length === 0 && (
+            <p className="pt-10 text-center text-sm text-zinc-500">No past chats yet.</p>
+          )}
+          <ul className="space-y-2">
+            {conversations?.map((c) => (
+              <li key={c.id}>
+                <button
+                  onClick={() => resumeChat(c.id)}
+                  disabled={loadingHistory}
+                  className={`w-full rounded-lg border px-3 py-2 text-left text-sm hover:bg-zinc-50 disabled:opacity-50 dark:hover:bg-zinc-900 ${
+                    c.id === conversationId
+                      ? "border-blue-500"
+                      : "border-zinc-200 dark:border-zinc-800"
+                  }`}
+                >
+                  <span className="block truncate font-medium">{c.title}</span>
+                  <span className="text-xs text-zinc-500">
+                    {new Date(c.updated_at).toLocaleString()} · {c.message_count}/
+                    {MAX_CONVERSATION_MESSAGES} messages
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+      <>
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <p className="pt-10 text-center text-sm text-zinc-500">
@@ -118,6 +201,14 @@ export default function ChatPage() {
         <div ref={bottomRef} />
       </div>
 
+      {isFull && (
+        <p className="px-4 pb-2 text-center text-xs text-amber-700 dark:text-amber-400">
+          This chat has reached its {MAX_CONVERSATION_MESSAGES}-message limit.{" "}
+          <button onClick={startNewChat} className="underline">
+            Start a new chat
+          </button>
+        </p>
+      )}
       <form
         onSubmit={onSend}
         className="flex gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800"
@@ -126,16 +217,19 @@ export default function ChatPage() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           maxLength={2000}
+          disabled={isFull}
           placeholder="Type a message…"
           className="flex-1 rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-zinc-700"
         />
         <button
-          disabled={sending || !input.trim()}
+          disabled={sending || isFull || !input.trim()}
           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           Send
         </button>
       </form>
+      </>
+      )}
     </div>
   );
 }
