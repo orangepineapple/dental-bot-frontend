@@ -68,7 +68,46 @@ export type RegisterInput = {
   phone_number?: string;
 };
 export const MAX_CONVERSATION_MESSAGES = 100;
-export type ChatReply = { conversation_id: string; reply: string; degraded: boolean };
+/** A booking the assistant suggested, waiting for the patient's Confirm / Decline. */
+export type Proposal = {
+  id: string;
+  kind: "booking";
+  appointment_type: string;
+  patient_first_name: string;
+  provider_name: string;
+  starts_at: string;
+  /** Server-formatted in the clinic's timezone, e.g. "Monday, November 2, 2026 at 9:00 AM EST". */
+  display_time: string;
+  duration_minutes: number;
+  expires_at: string;
+  reason: string | null;
+};
+/** A cancellation the assistant suggested, waiting for the patient's Confirm / Keep. */
+export type CancellationProposal = {
+  id: string;
+  kind: "cancellation";
+  appointment_type: string;
+  patient_first_name: string;
+  provider_name: string;
+  starts_at: string;
+  display_time: string;
+  expires_at: string;
+  reason: string | null;
+  late_cancellation: boolean;
+  policy_note: string | null;
+};
+export type PendingProposal = Proposal | CancellationProposal;
+export type ProposalResolution = {
+  status: "confirmed" | "declined" | "failed" | "expired" | "superseded";
+  message: string;
+  proposal: PendingProposal;
+};
+export type ChatReply = {
+  conversation_id: string;
+  reply: string;
+  degraded: boolean;
+  proposal: PendingProposal | null;
+};
 
 type TokenResponse = { access_token: string };
 
@@ -151,4 +190,26 @@ export function listConversations(): Promise<ConversationSummary[]> {
 
 export function getConversationMessages(id: string): Promise<TranscriptMessage[]> {
   return authedRequest<TranscriptMessage[]>(`/chat/conversations/${id}/messages`);
+}
+
+export function getPendingProposal(conversationId: string): Promise<PendingProposal | null> {
+  return authedRequest<PendingProposal | null>(`/chat/conversations/${conversationId}/proposal`);
+}
+
+export function resolveProposal(
+  proposalId: string,
+  action: "confirm" | "decline",
+): Promise<ProposalResolution> {
+  return authedRequest<ProposalResolution>(`/chat/proposals/${proposalId}/${action}`, {
+    method: "POST",
+  });
+}
+
+export function resolveCancellation(
+  proposalId: string,
+  action: "confirm" | "decline",
+): Promise<ProposalResolution> {
+  return authedRequest<ProposalResolution>(`/chat/cancellations/${proposalId}/${action}`, {
+    method: "POST",
+  });
 }

@@ -3,15 +3,20 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import BookingConfirmCard from "@/components/BookingConfirmCard";
+import CancelConfirmCard from "@/components/CancelConfirmCard";
 import {
   MAX_CONVERSATION_MESSAGES,
   getConversationMessages,
   getMe,
+  getPendingProposal,
   listConversations,
   logout,
   restoreSession,
   sendChatMessage,
   type ConversationSummary,
+  type PendingProposal,
+  type ProposalResolution,
   type User,
 } from "@/lib/api";
 
@@ -22,6 +27,7 @@ export default function ChatPage() {
   const [user, setUser] = useState<User | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [proposal, setProposal] = useState<PendingProposal | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +74,7 @@ export default function ChatPage() {
   function startNewChat() {
     setMessages([]);
     setConversationId(null);
+    setProposal(null);
     setError(null);
     setShowHistory(false);
   }
@@ -79,6 +86,7 @@ export default function ChatPage() {
       const transcript = await getConversationMessages(id);
       setMessages(transcript.map((m) => ({ role: m.role, content: m.content })));
       setConversationId(id);
+      setProposal(await getPendingProposal(id).catch(() => null));
       setShowHistory(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load chat");
@@ -102,11 +110,18 @@ export default function ChatPage() {
         ...m,
         { role: "assistant", content: res.reply, degraded: res.degraded },
       ]);
+      setProposal(res.proposal);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSending(false);
     }
+  }
+
+  // The server already stored its result text in the transcript; mirror it locally.
+  function onProposalResolved(resolution: ProposalResolution) {
+    setMessages((m) => [...m, { role: "assistant", content: resolution.message }]);
+    setProposal(null);
   }
 
   async function onLogout() {
@@ -196,6 +211,20 @@ export default function ChatPage() {
             </div>
           </div>
         ))}
+        {proposal && !sending && proposal.kind === "booking" && (
+          <BookingConfirmCard
+            key={proposal.id}
+            proposal={proposal}
+            onResolved={onProposalResolved}
+          />
+        )}
+        {proposal && !sending && proposal.kind === "cancellation" && (
+          <CancelConfirmCard
+            key={proposal.id}
+            proposal={proposal}
+            onResolved={onProposalResolved}
+          />
+        )}
         {sending && <p className="text-sm text-zinc-500">Assistant is typing…</p>}
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         <div ref={bottomRef} />
