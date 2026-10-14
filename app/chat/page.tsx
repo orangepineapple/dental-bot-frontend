@@ -35,14 +35,34 @@ export default function ChatPage() {
   const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const lastUserId = useRef<string | null>(null);
+
+  // Next's Activity-based route caching keeps this component's state alive after navigating
+  // to /login, so chat state must be cleared explicitly on logout and on a change of user.
+  function resetChat() {
+    setMessages([]);
+    setConversationId(null);
+    setProposal(null);
+    setInput("");
+    setError(null);
+    setShowHistory(false);
+    setConversations(null);
+  }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!(await restoreSession())) return router.replace("/login");
+      if (!(await restoreSession())) {
+        resetChat();
+        setUser(null);
+        return router.replace("/login");
+      }
       try {
         const me = await getMe();
-        if (!cancelled) setUser(me);
+        if (cancelled) return;
+        if (lastUserId.current && lastUserId.current !== me.id) resetChat();
+        lastUserId.current = me.id;
+        setUser(me);
       } catch {
         if (!cancelled) router.replace("/login");
       }
@@ -126,6 +146,9 @@ export default function ChatPage() {
 
   async function onLogout() {
     await logout();
+    resetChat();
+    setUser(null);
+    lastUserId.current = null;
     router.replace("/login");
   }
 
